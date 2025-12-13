@@ -4,281 +4,400 @@ import subprocess
 import threading
 import os
 import sys
-import ssl
 import socket
 import datetime
-from tkinter import messagebox, filedialog
 import shutil
+import requests
+import time
+import re
+from tkinter import messagebox, filedialog
 
 # --- Configuration ---
 ctk.set_appearance_mode("Dark")
-ctk.set_default_color_theme("green")  # Hacker-ish green theme
+ctk.set_default_color_theme("green")
 
-class RotemzScannerApp(ctk.CTk):
+class RotemzScanner(ctk.CTk):
     def __init__(self):
         super().__init__()
 
         # Root Check
         if os.geteuid() != 0:
-            messagebox.showerror("Permission Denied", "This tool must be run as root!")
-            print("Run as Root!")
-            sys.exit(1)
-
-        self.title("ROTEMZ Web Security Scanner")
-        self.geometry("900x700")
-
-        # Layout Configuration
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(2, weight=1)
-
-        # Header
-        self.header_label = ctk.CTkLabel(self, text="ROTEMZ Web Security Scanner", font=("Roboto Medium", 24))
-        self.header_label.grid(row=0, column=0, pady=20, sticky="ew")
-
-        # Input Frame
-        self.input_frame = ctk.CTkFrame(self)
-        self.input_frame.grid(row=1, column=0, padx=20, pady=10, sticky="ew")
-        self.input_frame.grid_columnconfigure(0, weight=1)
-
-        self.url_entry = ctk.CTkEntry(self.input_frame, placeholder_text="Enter Target URL/Domain (e.g., scanme.nmap.org)")
-        self.url_entry.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
-
-        self.start_button = ctk.CTkButton(self.input_frame, text="Start Scan", command=self.start_scan_thread)
-        self.start_button.grid(row=0, column=1, padx=10, pady=10)
-
-        # Status Label
-        self.status_label = ctk.CTkLabel(self, text="Status: Idle", text_color="gray")
-        self.status_label.grid(row=3, column=0, pady=5, sticky="w", padx=20)
-
-        # Results Area
-        self.results_textbox = ctk.CTkTextbox(self, font=("Consolas", 12))
-        self.results_textbox.grid(row=2, column=0, padx=20, pady=10, sticky="nsew")
-
-        # Footer / Actions
-        self.footer_frame = ctk.CTkFrame(self)
-        self.footer_frame.grid(row=4, column=0, padx=20, pady=10, sticky="ew")
-        self.footer_frame.grid_columnconfigure(0, weight=1)
+            messagebox.showwarning("Root Required", "Run as root (sudo) for full Nmap features.")
         
-        self.export_button = ctk.CTkButton(self.footer_frame, text="Export Report", command=self.export_report)
-        self.export_button.grid(row=0, column=1, padx=10, pady=10, sticky="e")
+        self.title("ROTEMZ Web Security Scanner v4.0 (Intelligence Edition)")
+        self.geometry("1200x850")
+        
+        # Grid Layout
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
 
+        # --- Sidebar (Left Panel) ---
+        self.sidebar_frame = ctk.CTkFrame(self, width=200, corner_radius=0)
+        self.sidebar_frame.grid(row=0, column=0, rowspan=2, sticky="nsew")
+        self.sidebar_frame.grid_rowconfigure(5, weight=1)
 
+        self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="ROTEMZ\nSCANNER v4.0", font=ctk.CTkFont(size=20, weight="bold"))
+        self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
+
+        # Target Input
+        self.target_label = ctk.CTkLabel(self.sidebar_frame, text="Target URL:", anchor="w")
+        self.target_label.grid(row=1, column=0, padx=20, pady=(10, 0))
+        self.url_entry = ctk.CTkEntry(self.sidebar_frame, placeholder_text="http://example.com")
+        self.url_entry.grid(row=2, column=0, padx=20, pady=(5, 10))
+
+        # Stealth Mode Switch
+        self.stealth_var = ctk.BooleanVar(value=False)
+        self.stealth_switch = ctk.CTkSwitch(self.sidebar_frame, text="Stealth Mode 🥷", variable=self.stealth_var)
+        self.stealth_switch.grid(row=3, column=0, padx=20, pady=10, sticky="w")
+
+        # Start Button
+        self.start_button = ctk.CTkButton(self.sidebar_frame, text="START SCAN 🚀", command=self.start_scan_thread, fg_color="#db2e2e", hover_color="#a81f1f")
+        self.start_button.grid(row=4, column=0, padx=20, pady=20)
+
+        # Export Button
+        self.export_button = ctk.CTkButton(self.sidebar_frame, text="Export HTML Report 📄", command=self.generate_html_report, state="disabled")
+        self.export_button.grid(row=6, column=0, padx=20, pady=20)
+
+        # --- Main Content Area (Tabs) ---
+        self.tab_view = ctk.CTkTabview(self)
+        self.tab_view.grid(row=0, column=1, padx=20, pady=(10, 0), sticky="nsew")
+        
+        self.tab_dashboard = self.tab_view.add("Dashboard")
+        self.tab_live = self.tab_view.add("Live Terminal")
+        self.tab_raw = self.tab_view.add("Raw Data")
+
+        # Tab 1: Dashboard
+        self.tab_dashboard.grid_columnconfigure(0, weight=1)
+        self.tab_dashboard.grid_rowconfigure(0, weight=1)
+        self.dashboard_text = ctk.CTkTextbox(self.tab_dashboard, font=("Consolas", 14), state="disabled")
+        self.dashboard_text.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        # Configure tags for colors
+        self.dashboard_text.tag_config("red", foreground="#ff4444")
+        self.dashboard_text.tag_config("green", foreground="#00ff00")
+        self.dashboard_text.tag_config("orange", foreground="#FFA500")
+
+        # Tab 2: Live Terminal
+        self.live_text = ctk.CTkTextbox(self.tab_live, font=("Courier New", 12), text_color="#00ff00", fg_color="black")
+        self.live_text.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        self.tab_live.grid_columnconfigure(0, weight=1)
+        self.tab_live.grid_rowconfigure(0, weight=1)
+
+        # Tab 3: Raw Data
+        self.raw_text = ctk.CTkTextbox(self.tab_raw, font=("Consolas", 12))
+        self.raw_text.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        self.tab_raw.grid_columnconfigure(0, weight=1)
+        self.tab_raw.grid_rowconfigure(0, weight=1)
+
+        # --- Footer ---
+        self.status_label = ctk.CTkLabel(self, text="Status: Idle", anchor="w")
+        self.status_label.grid(row=1, column=1, padx=20, pady=(0, 5), sticky="w")
+        
+        self.progress_bar = ctk.CTkProgressBar(self)
+        self.progress_bar.grid(row=2, column=1, padx=20, pady=(0, 20), sticky="ew")
+        self.progress_bar.set(0)
+
+        # Scan Data
+        self.scan_results = {
+            "target": "", "start_time": "", "waf": "Not detected", "cms": "Unknown", "tech_stack": [],
+            "subdomains": [], "wordpress_users": [], "open_ports": [], "exploits": [], "robots_txt": "Not found"
+        }
+
+    def log_dashboard(self, message, tag=None):
+        self.dashboard_text.configure(state="normal")
+        if tag:
+            self.dashboard_text.insert("end", message + "\n", tag)
+        else:
+            self.dashboard_text.insert("end", message + "\n")
+        self.dashboard_text.see("end")
+        self.dashboard_text.configure(state="disabled")
+
+    def log_live(self, message):
+        self.live_text.insert("end", message + "\n")
+        self.live_text.see("end")
+
+    def log_raw(self, message):
+        self.raw_text.insert("end", message + "\n")
+        self.raw_text.see("end")
+
+    def update_status(self, text, progress=None):
+        self.status_label.configure(text=f"Status: {text}")
+        if progress is not None:
+            self.progress_bar.set(progress)
+    
     def start_scan_thread(self):
         target = self.url_entry.get().strip()
         if not target:
-            messagebox.showwarning("Input Error", "Please enter a target URL or Domain.")
+            messagebox.showwarning("Error", "Please enter a target URL.")
             return
 
-        self.start_button.configure(state="disabled")
-        self.results_textbox.delete("1.0", "end")
-        self.update_status("Starting scan on " + target + "...")
+        if not (target.startswith("http://") or target.startswith("https://")):
+            target = "http://" + target 
         
-        # Start background thread
+        # Reset UI
+        self.start_button.configure(state="disabled")
+        self.export_button.configure(state="disabled")
+        self.dashboard_text.configure(state="normal")
+        self.dashboard_text.delete("1.0", "end")
+        self.dashboard_text.configure(state="disabled")
+        self.live_text.delete("1.0", "end")
+        self.raw_text.delete("1.0", "end")
+        self.progress_bar.set(0)
+        
+        # Start Thread
         thread = threading.Thread(target=self.run_scan_logic, args=(target,))
         thread.daemon = True
         thread.start()
 
-    def update_status(self, message):
-        self.status_label.configure(text=f"Status: {message}")
-        self.update_idletasks()
-
-    def append_output(self, text):
-        self.results_textbox.insert("end", text + "\n")
-        self.results_textbox.see("end")
+    def run_command_live(self, command, env=None):
+        self.log_live(f"\n[EXEC] {command}")
+        output_buffer = ""
+        try:
+            process = subprocess.Popen(
+                command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, env=env
+            )
+            for line in iter(process.stdout.readline, ''):
+                self.log_live(line.strip())
+                output_buffer += line
+            process.wait()
+            return output_buffer
+        except Exception as e:
+            self.log_live(f"[ERROR] {e}")
+            return ""
 
     def run_scan_logic(self, target):
         try:
-            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            self.append_output("--- ROTEMZ Web Security Scanner Report ---")
-            self.append_output(f"Target: {target}")
-            self.append_output(f"Date: {timestamp}\n")
+            domain = target.replace("http://", "").replace("https://", "").split("/")[0]
+            self.scan_results = {
+                "target": target, "start_time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "waf": "Not detected", "cms": "Unknown", "tech_stack": [], "subdomains": [],
+                "wordpress_users": [], "open_ports": [], "exploits": [], "robots_txt": "Not found"
+            }
 
-            # Extract hostname from URL if needed
-            hostname = target.replace("http://", "").replace("https://", "").split("/")[0]
-
-            # 1. DNS Recon
-            self.update_status(f"Running DNS Recon on {hostname}...")
-            self.scan_dns(hostname)
-
-            # 2. Ports (Nmap)
-            self.update_status(f"Running Nmap on {hostname}...")
-            self.scan_nmap(hostname)
-
-            # 3. SSL Info
-            self.update_status(f"Fetching SSL Info for {hostname}...")
-            self.scan_ssl(hostname)
-
-            # 4. Web Vulns (Nikto)
-            self.update_status(f"Running Nikto on {target}...")
-            self.scan_nikto(target)
-
-            # 5. Directory Enum (Gobuster)
-            self.update_status(f"Running Gobuster on {target}...")
-            self.scan_gobuster(target)
-
-            self.update_status("Scan Complete.")
-            self.append_output("\n[+] Scan Finished Successfully.")
+            self.log_dashboard(f"--- ROTEMZ SCANNER v4.0 STARTED: {self.scan_results['start_time']} ---")
+            self.log_dashboard(f"Target: {target} ({domain})")
             
-        except Exception as e:
-            self.append_output(f"\n[!] Critical Error during scan: {str(e)}")
-            self.update_status("Error occurred.")
-        finally:
-             self.start_button.configure(state="normal")
-
-    # --- Scanning Modules ---
-
-    def run_command(self, command):
-        """Helper to run shell commands and return output, handling missing tools."""
-        tool = command.split()[0]
-        if not shutil.which(tool):
-            return f"[!] Error: Tool '{tool}' not found on this system."
-        
-        try:
-            process = subprocess.Popen(
-                command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-            )
-            stdout, stderr = process.communicate()
-            if process.returncode != 0 and not stdout: # Some tools return non-zero on minor issues but still give output
-                 return f"Error running {tool}: {stderr.strip()}"
-            return stdout
-        except Exception as e:
-            return f"Exception running {tool}: {str(e)}"
-
-    def scan_dns(self, hostname):
-        self.append_output("[+] DNS Records")
-        try:
-            # Using 'host' command as it's common on Kali
-            output = self.run_command(f"host {hostname}")
-            if "not found" in output:
-                self.append_output("   - Host not found or DNS resolution failed.")
+            # --- 1. WAF Detection ---
+            self.update_status("Detecting WAF...", 0.1)
+            self.log_dashboard("[*] Checking for WAF...")
+            if shutil.which("wafw00f"):
+                out = self.run_command_live(f"wafw00f {target}")
+                if "is behind" in out:
+                    for line in out.splitlines():
+                        if "is behind" in line:
+                            self.scan_results["waf"] = line.strip()
+                            self.log_dashboard(f"[!] WAF DETECTED: {line.strip()}", "red")
+                else:
+                    self.log_dashboard("[-] No WAF detected.", "green")
             else:
-                for line in output.splitlines():
-                    if "has address" in line: # A record
-                        self.append_output(f"   - A: {line.split()[-1]}")
-                    elif "mail is handled by" in line: # MX record
-                        self.append_output(f"   - MX: {line.split()[-1]}")
-                    elif "name server" in line: # NS record
-                         self.append_output(f"   - NS: {line.split()[-1]}")
-        except Exception as e:
-            self.append_output(f"   - Error fetching DNS: {e}")
-        self.append_output("")
+                self.log_dashboard("[!] wafw00f not installed.")
 
-    def scan_nmap(self, hostname):
-        self.append_output("[+] Network & Ports")
-        cmd = f"nmap -F {hostname}"
-        output = self.run_command(cmd)
-        
-        found_ports = False
-        for line in output.splitlines():
-            if "/tcp" in line and "open" in line:
-                # Clean up format: "80/tcp open http" -> "Port 80: Open (http)"
-                parts = line.split()
-                port = parts[0].split('/')[0]
-                service = parts[2] if len(parts) > 2 else "unknown"
-                self.append_output(f"   - Port {port}: Open ({service})")
-                found_ports = True
-        
-        if not found_ports:
-             self.append_output("   - No open ports found (top 100 fast scan).")
-        self.append_output("")
-
-    def scan_ssl(self, hostname):
-        self.append_output("[+] SSL Details")
-        try:
-            ctx = ssl.create_default_context()
-            with socket.create_connection((hostname, 443), timeout=5) as sock:
-                with ctx.wrap_socket(sock, server_hostname=hostname) as ssock:
-                    cert = ssock.getpeercert()
-                    
-                    # Issuer
-                    issuer = dict(x[0] for x in cert['issuer'])
-                    org_name = issuer.get('organizationName') or issuer.get('commonName') or "Unknown"
-                    self.append_output(f"   - Issuer: {org_name}")
-                    
-                    # Expiry
-                    not_after = cert['notAfter']
-                    # Parse date format: 'Dec 31 23:59:59 2025 GMT'
-                    dt = datetime.datetime.strptime(not_after, '%b %d %H:%M:%S %Y %Z')
-                    self.append_output(f"   - Expires: {dt.strftime('%Y-%m-%d')}")
-        except Exception as e:
-             self.append_output(f"   - SSL Info unavailable or connection failed: {e}")
-        self.append_output("")
-
-    def scan_nikto(self, target):
-        self.append_output("[+] Web Vulnerabilities (Nikto)")
-        # -Tuning x 6 options for speed if desired, or standard. Command hint said -Tuning x 6
-        cmd = f"nikto -h {target} -Tuning x6 -nointeractive" 
-        output = self.run_command(cmd)
-        
-        count = 0
-        for line in output.splitlines():
-            if line.startswith("+"):
-                # Clean up the output, maybe truncate long lines
-                clean_line = line[1:].strip() # Remove leading +
-                if len(clean_line) > 100:
-                    clean_line = clean_line[:97] + "..."
-                self.append_output(f"   - {clean_line}")
-                count += 1
-        
-        if count == 0:
-            self.append_output("   - No specific vulnerabilities found in fast scan.")
-        self.append_output("")
-
-    def scan_gobuster(self, target):
-        self.append_output("[+] Directory Enum (Gobuster)")
-        wordlist = "/usr/share/wordlists/dirb/common.txt"
-        
-        if not os.path.exists(wordlist):
-             self.append_output(f"   - Wordlist not found at {wordlist}. Skipping.")
-             return
-
-        # -b 404 to hide 404s, -q for quiet mode to make parsing easier (or just parse standard)
-        # using -n (no status) might check flags. 
-        # Hint said: Suppress 404.
-        cmd = f"gobuster dir -u {target} -w {wordlist} -b 404 --no-error -t 20"
-        
-        # Gobuster relies on real-time output often, but for this simplified GUI we wait for process or read line by line.
-        # For simplicity in this structure, we run it and wait, but it might take time.
-        # Since we are in a thread, it won't freeze UI, but user sees nothing until done.
-        # Optimization: Could use Popen and read stdout in loop to stream results, but requirements say "Capture output... CLEAN/PARSE ... before displaying".
-        # So waiting is fine as long as we parse it well.
-        
-        output = self.run_command(cmd)
-        
-        for line in output.splitlines():
-            if line.startswith("/"):
-                # Format: /admin (Status: 301)
-                # gobuster output usually looks like: /admin (Status: 301) [Size: 123]
-                parts = line.split()
-                path = parts[0]
-                status = "Unknown"
-                for part in parts:
-                    if "Status:" in part: # newer gobuster
-                        # Status: 301) -> catch parsing
-                        pass
+            # --- 2. Subdomain Enumeration (NEW) ---
+            self.update_status("Enumerating Subdomains (This may take time)...", 0.2)
+            self.log_dashboard("\n[*] Enumerating Subdomains...")
+            if shutil.which("sublist3r"):
+                # Capturing output for raw tab
+                cmd = f"sublist3r -d {domain} -n -t 10"
+                out = self.run_command_live(cmd)
                 
-                # Simple parsing as gobuster output is fairly clean
-                self.append_output(f"   - {line.strip()}")
-        
-        if not output.strip():
-             self.append_output("   - No directories found or tool failed.")
-        self.append_output("")
+                # Parse
+                found_subs = []
+                for line in out.splitlines():
+                    clean = line.strip()
+                    # Sublist3r usually outputs domains at the end or cleanly. We look for domains ending in base domain.
+                    if clean.endswith(domain) and clean != domain:
+                         if clean not in found_subs: # avoid dupes
+                            found_subs.append(clean)
 
-    def export_report(self):
-        report_content = self.results_textbox.get("1.0", "end")
-        if not report_content.strip():
-            messagebox.showinfo("Export", "Nothing to export yet!")
-            return
-            
-        filename = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=[("Text Files", "*.txt")])
-        if filename:
+                self.scan_results["subdomains"] = found_subs
+                self.log_raw(f"\n--- Subdomains ---\n{chr(10).join(found_subs)}\n------------------")
+                self.log_dashboard(f"[+] Found {len(found_subs)} unique subdomains (See 'Raw Data').")
+            else:
+                 self.log_dashboard("[!] sublist3r not installed.")
+
+            # --- 3. Tech Stack Fingerprinting (NEW) ---
+            self.update_status("Fingerprinting Tech Stack...", 0.35)
+            self.log_dashboard("\n[*] Fingerprinting Tech Stack (WhatWeb)...")
+            if shutil.which("whatweb"):
+                out = self.run_command_live(f"whatweb --color=never --no-errors -a 3 {target}")
+                # Parse output - WhatWeb output is usually one line per target with comma separated tags
+                # Example: http://example.com [200 OK] Country[US], HTTPServer[ECS], IP[93.184.216.34], Title[Example Domain]
+                
+                # We want to extract key info
+                techs = []
+                # Simple regex or string split
+                if "]" in out:
+                     parts = out.split(", ")
+                     for p in parts:
+                         if "[" in p and "]" in p:
+                             techs.append(p.strip())
+                
+                self.scan_results["tech_stack"] = techs
+                if techs:
+                     self.log_dashboard("[+] Tech Stack Identified:")
+                     for t in techs:
+                         self.log_dashboard(f"    - {t}")
+            else:
+                self.log_dashboard("[!] whatweb not installed.")
+
+            # --- 4. CMS Detection (WordPress) ---
+            self.update_status("Checking CMS...", 0.5)
+            self.log_dashboard("\n[*] Checking for WordPress...")
+            is_wp = False
+            # Quick Check
             try:
-                with open(filename, "w") as f:
-                    f.write(report_content)
-                messagebox.showinfo("Export Success", f"Report saved to {filename}")
-            except Exception as e:
-                messagebox.showerror("Export Error", f"Failed to save file: {e}")
+                r = requests.get(f"{target}/wp-login.php", timeout=5, verify=False)
+                if r.status_code == 200: is_wp = True
+            except: pass
+            
+            if is_wp:
+                self.scan_results["cms"] = "WordPress"
+                self.log_dashboard("[+] WordPress Detected!", "orange")
+                if shutil.which("wpscan"):
+                    self.log_dashboard("    Running WPScan User Enum...")
+                    out = self.run_command_live(f"wpscan --url {target} --enumerate u --no-banner --random-user-agent")
+                    if "Identified the following" in out:
+                        self.scan_results["wordpress_users"] = ["Users found (Check logs)"]
+                        self.log_dashboard("[!] WordPress Users Found!", "red")
+            else:
+                self.log_dashboard("[-] No WordPress detected.")
+
+            # --- 5. Nmap Scan (Service Detection) ---
+            self.update_status("Running Nmap (Service Discovery)...", 0.65)
+            self.log_dashboard("\n[*] Running Nmap Service Scan...")
+            
+            nmap_cmd = f"nmap -sV -F {domain}" # Added -sV for service version
+            if self.stealth_var.get():
+                nmap_cmd = f"nmap -sV -sS -T2 -f {domain}" # Stealth + Version
+                
+            services_found = [] # List of (port, service_name, version)
+            
+            if shutil.which("nmap"):
+                out = self.run_command_live(nmap_cmd)
+                
+                # Parse Nmap Output for Services
+                # Example: 21/tcp open ftp vsftpd 2.3.4
+                for line in out.splitlines():
+                    if "/tcp" in line and "open" in line:
+                         parts = line.split()
+                         port = parts[0]
+                         service = parts[2]
+                         version = " ".join(parts[3:]) # Grab rest of line as version
+                         services_found.append({'port': port, 'service': service, 'version': version})
+                         self.scan_results["open_ports"].append(f"{port}: {service} {version}")
+
+                if not services_found:
+                    self.log_dashboard("[-] No open ports found.")
+            else:
+                self.log_dashboard("[!] Nmap not installed.")
+
+            # --- 6. Exploit Check (NEW) ---
+            self.update_status("Checking for Exploits...", 0.85)
+            self.log_dashboard("\n[*] Correlating Vulnerabilities (Exploit-DB)...")
+            
+            if shutil.which("searchsploit") and services_found:
+                for svc in services_found:
+                    s_name = svc['service']
+                    s_ver = svc['version']
+                    
+                    if s_name == "unknown" or not s_ver: continue
+                    
+                    # Clean version for search (remove extra info inside parens usually)
+                    # Simple heuristic: take first 2 words of version
+                    search_term = f"{s_name} {s_ver.split('(')[0].strip()}"
+                    
+                    self.log_live(f"\n[SEARCH] Checking exploits for: {search_term}")
+                    # Run searchsploit
+                    # searchsploit --json is parsed easier, but simple text grep is fine for this UI
+                    out = self.run_command_live(f"searchsploit {search_term}")
+                    
+                    if "Exploits: No Results" not in out and "Error" not in out and "not found" not in out.lower():
+                        # Parse lines that look like exploits
+                        lines = out.splitlines()
+                        found_for_service = False
+                        for line in lines:
+                             if "|" in line and "Path" not in line and "Title" not in line: # Skip headers
+                                 title = line.split("|")[0].strip()
+                                 path = line.split("|")[1].strip()
+                                 self.log_dashboard(f"[!] VULN FOUND: {title}", "red")
+                                 self.scan_results["exploits"].append(f"Port {svc['port']} ({s_name}): {title}")
+                                 found_for_service = True
+                                 break # Just show one/first exploit to avoid spamming dashboard
+                        if not found_for_service:
+                             # It might have returned results but header-only or similar
+                             pass
+            elif not shutil.which("searchsploit"):
+                self.log_dashboard("[!] searchsploit not installed.")
+            
+            # Robots/Sitemap (Fast)
+            self.update_status("Finalizing...", 0.95)
+            try:
+                 if requests.get(f"{target}/robots.txt", timeout=3, verify=False).status_code == 200:
+                     self.scan_results["robots_txt"] = "Found"
+                 if requests.get(f"{target}/sitemap.xml", timeout=3, verify=False).status_code == 200:
+                     self.log_raw("\nsitemap.xml found")
+            except: pass
+
+            self.update_status("Scan Complete", 1.0)
+            self.log_dashboard("\n--- SCAN FINISHED ---", "green")
+            self.start_button.configure(state="normal")
+            self.export_button.configure(state="normal")
+
+        except Exception as e:
+            self.log_dashboard(f"\n[!] CRITICAL ERROR: {e}", "red")
+            self.update_status("Error", 0)
+            self.start_button.configure(state="normal")
+
+    def generate_html_report(self):
+        filename = filedialog.asksaveasfilename(defaultextension=".html", filetypes=[("HTML Files", "*.html")], initialfile="rotemz_v4_report.html")
+        if not filename: return
+        
+        # Build HTML
+        html = f"""
+        <html>
+        <head>
+            <title>ROTEMZ v4.0 Report</title>
+            <style>
+                body {{ font-family: sans-serif; background: #1a1a1a; color: #e0e0e0; padding: 20px; }}
+                h1, h2 {{ color: #00ff00; border-bottom: 1px solid #444; }}
+                .alert {{ color: #ff5555; font-weight: bold; }}
+                .box {{ background: #2b2b2b; padding: 15px; margin: 10px 0; border-radius: 5px; }}
+            </style>
+        </head>
+        <body>
+            <h1>ROTEMZ Web Security Scanner v4.0 Report</h1>
+            <p>Target: {self.scan_results['target']} | Date: {self.scan_results['start_time']}</p>
+            
+            <h2>1. Intelligence Overview</h2>
+            <div class="box">
+                <p><strong>WAF:</strong> {self.scan_results['waf']}</p>
+                <p><strong>CMS:</strong> {self.scan_results['cms']}</p>
+                <p><strong>Tech Stack:</strong></p>
+                <ul>{''.join([f'<li>{t}</li>' for t in self.scan_results['tech_stack']])}</ul>
+            </div>
+
+            <h2>2. Subdomains ({len(self.scan_results['subdomains'])})</h2>
+            <div class="box">
+                <pre>{chr(10).join(self.scan_results['subdomains']) if self.scan_results['subdomains'] else "No subdomains found."}</pre>
+            </div>
+
+            <h2>3. Critical Vulnerabilities</h2>
+            <div class="box">
+                {''.join([f'<p class="alert">{e}</p>' for e in self.scan_results['exploits']]) if self.scan_results['exploits'] else "<p>No direct exploits correlated.</p>"}
+            </div>
+            
+            <h2>4. Open Ports & Services</h2>
+            <div class="box">
+                <ul>{''.join([f'<li>{p}</li>' for p in self.scan_results['open_ports']])}</ul>
+            </div>
+        </body>
+        </html>
+        """
+        try:
+            with open(filename, "w") as f: f.write(html)
+            messagebox.showinfo("Success", f"Report saved to {filename}")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
 
 if __name__ == "__main__":
-    app = RotemzScannerApp()
+    app = RotemzScanner()
     app.mainloop()
