@@ -1,23 +1,28 @@
-# ROTEMZ Web Security Scanner 🔐
+# ROTEMZ Web Security Scanner v4.0 🛡️
 
-A GUI-based Web Security Scanner built for Kali Linux using Python.
-Designed for red teams and security analysts to perform quick reconnaissance.
+The **Ultimate Intelligence Edition**. A GUI-based Recon & Vulnerability Scanner for Kali Linux.
+Now powered with **Exploit-DB correlation**, **Subdomain Enumeration**, and **CMS Fingerprinting**.
 
-## Features 🚀
-* **Port Scanning:** Nmap integration for top ports.
-* **Web Vulns:** Nikto integration for basic vulnerability scanning.
-* **Directory Busting:** Gobuster integration (hidden paths).
-* **DNS Recon:** DNS enumeration.
-* **SSL Check:** Certificate validity inspection.
-* **Modern GUI:** Built with CustomTkinter (Dark Mode).
+## 🔥 New Features in v4.0
+* **💣 Exploit-DB Integration:** Automatically correlates service versions with known CVEs/Exploits using `searchsploit`.
+* **🌐 Subdomain Enumeration:** Discovers hidden subdomains using `sublist3r`.
+* **🕵️‍♂️ Deep Fingerprinting:** Identifies tech stacks (CMS, JS Frameworks, Server versions) using `whatweb`.
+* **🥷 Stealth Mode:** Bypass WAF/IDS with fragmented packets and slow timing.
+* **📂 WordPress & Robots:** Auto-detects WP users and extracts robots.txt/sitemaps.
+* **📄 HTML Reporting:** Generates a full styled report.
 
-## Installation 🛠️
-1. Clone the repo:
-   `git clone https://github.com/YOUR-USERNAME/ROTEMZ-Scanner.git`
-2. Install dependencies:
-   `sudo pip3 install -r requirements.txt`
-3. Run the tool:
-   `sudo python3 rotemz_scanner.py`
+## 🛠️ Installation
+```bash
+# 1. Clone the repo
+git clone [https://github.com/rotemvnkll-ctrl/ROTEMZ-Web-Security-Scanner.git](https://github.com/rotemvnkll-ctrl/ROTEMZ-Web-Security-Scanner.git)
+cd ROTEMZ-Web-Security-Scanner
 
-## Disclaimer ⚠️
-For educational purposes only. Use only on targets you have permission to test.
+# 2. Install System Tools (Kali Linux)
+sudo apt update
+sudo apt install nmap nikto gobuster wafw00f wpscan whatweb sublist3r exploitdb -y
+
+# 3. Install Python Deps
+sudo pip3 install -r requirements.txt
+
+# 4. Run (Must use Sudo)
+sudo python3 rotemz_scanner.py
