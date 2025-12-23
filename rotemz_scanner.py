@@ -12,6 +12,7 @@ import time
 import re
 from tkinter import messagebox, filedialog
 import json
+from urllib.parse import urljoin
 
 # Optional Imports
 try:
@@ -36,7 +37,7 @@ class RotemzScanner(ctk.CTk):
         if os.geteuid() != 0:
             messagebox.showwarning("Root Required", "Run as root (sudo) for full features (Nmap/Stealth).")
         
-        self.title("ROTEMZ Web Security Scanner v5.0 (The Modular Arsenal)")
+        self.title("ROTEMZ Web Security Scanner v6.0 (The Modular Arsenal)")
         self.geometry("1400x900")
         
         # Grid Layout
@@ -48,7 +49,7 @@ class RotemzScanner(ctk.CTk):
         self.sidebar_frame.grid(row=0, column=0, rowspan=2, sticky="nsew")
         self.sidebar_frame.grid_rowconfigure(4, weight=1) # List expands
 
-        self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="ROTEMZ\nARSENAL v5.0", font=ctk.CTkFont(size=20, weight="bold"))
+        self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="ROTEMZ\nARSENAL v6.0", font=ctk.CTkFont(size=20, weight="bold"))
         self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
 
         # Target Input
@@ -62,23 +63,38 @@ class RotemzScanner(ctk.CTk):
         self.stealth_switch = ctk.CTkSwitch(self.sidebar_frame, text="Stealth Mode 🥷", variable=self.stealth_var)
         self.stealth_switch.grid(row=3, column=0, padx=20, pady=10, sticky="w")
 
+        # Hexstrike AI Switch
+        self.hexstrike_var = ctk.BooleanVar(value=False)
+        self.hexstrike_switch = ctk.CTkSwitch(self.sidebar_frame, text="🤖 Activate Hexstrike AI", variable=self.hexstrike_var, progress_color="#8A2BE2")
+        self.hexstrike_switch.grid(row=4, column=0, padx=20, pady=10, sticky="w")
+
         # --- Modular Scanning List ---
         self.modules_label = ctk.CTkLabel(self.sidebar_frame, text="Select Modules:", anchor="w", font=("default", 12, "bold"))
-        self.modules_label.grid(row=4, column=0, padx=20, pady=(20, 5), sticky="w")
+        self.modules_label.grid(row=5, column=0, padx=20, pady=(20, 5), sticky="w")
 
         self.modules_frame = ctk.CTkScrollableFrame(self.sidebar_frame, label_text="Available Engines")
-        self.modules_frame.grid(row=5, column=0, padx=10, pady=(0, 10), sticky="nsew")
+        self.modules_frame.grid(row=6, column=0, padx=10, pady=(0, 10), sticky="nsew")
         
+        # Module Checkboxes
         # Module Checkboxes
         self.check_vars = {}
         self.module_names = [
-            "Nmap Port Scan", "Nikto Web Scan", "WAF Detection", "Subdomain Enum", 
-            "CMS/WP Scan", "Exploit Check", "Whois & GeoIP", "Cloud Buckets", 
-            "Security Headers", "Broken Links"
+            "Nmap Port Scan",
+            "Nikto Web Scan",
+            "WAF Detection",
+            "Subdomains Enum",
+            "CMS/WP Scan",
+            "Exploit Check",
+            "Whois & GeoIP",
+            "Cloud Buckets",
+            "Security Headers",
+            "Broken Links",
+            "Secrets Hunter (JS)"
         ]
-        
+
+        # Loop to create the checkboxes based on self.module_names
         for mod in self.module_names:
-            var = ctk.BooleanVar(value=True) # Default all checked
+            var = ctk.BooleanVar(value=True)
             chk = ctk.CTkCheckBox(self.modules_frame, text=mod, variable=var)
             chk.pack(anchor="w", pady=2, padx=5)
             self.check_vars[mod] = var
@@ -86,15 +102,15 @@ class RotemzScanner(ctk.CTk):
         # Select All
         self.select_all_var = ctk.BooleanVar(value=True)
         self.select_all_check = ctk.CTkCheckBox(self.sidebar_frame, text="Select All", variable=self.select_all_var, command=self.toggle_all)
-        self.select_all_check.grid(row=6, column=0, padx=20, pady=5, sticky="w")
+        self.select_all_check.grid(row=7, column=0, padx=20, pady=5, sticky="w")
 
         # Start Button
         self.start_button = ctk.CTkButton(self.sidebar_frame, text=" START SCAN 🚀 ", command=self.start_scan_thread, fg_color="#db2e2e", hover_color="#a81f1f", height=40)
-        self.start_button.grid(row=7, column=0, padx=20, pady=20)
+        self.start_button.grid(row=8, column=0, padx=20, pady=20)
 
         # Export Button
         self.export_button = ctk.CTkButton(self.sidebar_frame, text="Export Report 📄", command=self.generate_html_report, state="disabled")
-        self.export_button.grid(row=8, column=0, padx=20, pady=(0, 20))
+        self.export_button.grid(row=9, column=0, padx=20, pady=(0, 20))
 
         # --- Main Content Area (Tabs) ---
         self.tab_view = ctk.CTkTabview(self)
@@ -115,6 +131,7 @@ class RotemzScanner(ctk.CTk):
         self.dashboard_text.tag_config("green", foreground="#00ff00")
         self.dashboard_text.tag_config("orange", foreground="#FFA500")
         self.dashboard_text.tag_config("blue", foreground="#4da6ff")
+        self.dashboard_text.tag_config("purple", foreground="#8A2BE2")
 
         # Tab 2: Live
         self.live_text = ctk.CTkTextbox(self.tab_live, font=("Courier New", 12), text_color="#00ff00", fg_color="black")
@@ -144,7 +161,7 @@ class RotemzScanner(ctk.CTk):
             "target": "", "domain": "", "start_time": "",
             "whois": {}, "buckets": [], "headers": [], "broken_links": [], "threat_intel": "",
             "waf": "Not detected", "cms": "Unknown", "tech_stack": [], "subdomains": [],
-            "wordpress_users": [], "open_ports": [], "exploits": [], "nikto": []
+            "wordpress_users": [], "open_ports": [], "exploits": [], "nikto": [], "secrets": []
         }
 
     def toggle_all(self):
@@ -223,9 +240,17 @@ class RotemzScanner(ctk.CTk):
             self.scan_results["domain"] = domain
             self.scan_results["start_time"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
-            self.log_dashboard(f"--- ROTEMZ ARSENAL v5.0 STARTED ---", "blue")
-            self.log_dashboard(f"Target: {target}")
+            self.log_dashboard(f"--- ROTEMZ ARSENAL v6.0 STARTED ---", "blue")
+            self.log_dashboard(f"Targets: {target}")
             self.log_dashboard(f"Modules: {len(modules)} selected\n")
+
+            # Hexstrike AI Check
+            if self.hexstrike_var.get():
+                try:
+                    subprocess.Popen(["x-terminal-emulator", "-e", "hexstrike_mcp"])
+                    self.log_dashboard("[+] 🤖 Hexstrike-AI Agent launched in autonomous mode!", "purple")
+                except Exception as e:
+                    self.log_dashboard(f"[!] Hexstrike Launch Failed: {e}", "red")
 
             total_steps = len(modules)
             current_step = 0
@@ -348,7 +373,7 @@ class RotemzScanner(ctk.CTk):
                     self.log_dashboard(f"[!] Header analysis failed: {e}")
 
             # 5. Subdomain Enum
-            if "Subdomain Enum" in modules:
+            if "Subdomains Enum" in modules:
                 current_step += 1
                 self.update_status("Enumerating Subdomains...", current_step/total_steps)
                 if shutil.which("sublist3r"):
@@ -473,6 +498,12 @@ class RotemzScanner(ctk.CTk):
                 else:
                     self.log_dashboard("[!] Nikto missing.")
 
+            # 11. Secrets Hunter
+            if "Secrets Hunter (JS)" in modules:
+                current_step += 1
+                self.update_status("Hunting Secrets...", current_step/total_steps)
+                self.scan_secrets_logic(target, domain)
+
             # Finish
             self.update_status("Scan Complete", 1.0)
             self.log_dashboard("\n--- SCAN FINISHED ---", "green")
@@ -484,14 +515,14 @@ class RotemzScanner(ctk.CTk):
             self.start_button.configure(state="normal")
 
     def generate_html_report(self):
-        filename = filedialog.asksaveasfilename(defaultextension=".html", filetypes=[("HTML", "*.html")], initialfile="rotemz_v5_report.html")
+        filename = filedialog.asksaveasfilename(defaultextension=".html", filetypes=[("HTML", "*.html")], initialfile="rotemz_v6_report.html")
         if not filename: return
         
         r = self.scan_results
         html = f"""
         <html>
         <head>
-            <title>ROTEMZ v5.0 Report</title>
+            <title>ROTEMZ v6.0 Report</title>
             <style>
                 body {{ font-family: 'Segoe UI', sans-serif; background: #121212; color: #ddd; padding: 20px; }}
                 h1 {{ color: #00ff00; border-bottom: 2px solid #333; }}
@@ -502,7 +533,7 @@ class RotemzScanner(ctk.CTk):
             </style>
         </head>
         <body>
-            <h1>ROTEMZ ARSENAL v5.0 Scan Report</h1>
+            <h1>ROTEMZ ARSENAL v6.0 Scan Report</h1>
             <p>Target: {r['target']} | Domain: {r['domain']}</p>
             <p>Date: {r['start_time']}</p>
 
@@ -539,6 +570,13 @@ class RotemzScanner(ctk.CTk):
                 <p><strong>Potential Exploits:</strong></p>
                 <ul>{''.join([f'<li class="alert">{e}</li>' for e in r['exploits']])}</ul>
             </div>
+
+            <h2>5. Leaked Secrets (CRITICAL)</h2>
+            <div class="box">
+                <p><strong>Sensitive Keys Found:</strong></p>
+                <ul>{''.join([f'<li class="alert">{s}</li>' for s in r['secrets']])}</ul>
+                <p><em>(If any keys found, rotate immediately!)</em></p>
+            </div>
         </body>
         </html>
         """
@@ -547,6 +585,78 @@ class RotemzScanner(ctk.CTk):
             messagebox.showinfo("Report Saved", f"Saved to {filename}")
         except Exception as e:
             messagebox.showerror("Error", str(e))
+
+    def scan_secrets_logic(self, target, domain):
+        self.log_dashboard("[*] Starting Secrets Hunter (Main + JS)...")
+        secrets_found = []
+        js_urls = set()
+        
+        # Regex Patterns
+        patterns = {
+            "Google API": r"AIza[0-9A-Za-z-_]{35}",
+            "AWS Access Key": r"AKIA[0-9A-Z]{16}",
+            "Generic Secret": r"(api_key|apikey|secret|token)\s*[:=]\s*['\"][0-9a-zA-Z\-_]{20,}['\"]",
+            "Private Key": r"-----BEGIN RSA PRIVATE KEY-----"
+        }
+
+        try:
+            # Fetch Main HTML
+            self.log_dashboard("[*] Crawling main page...")
+            try:
+                r = requests.get(target, timeout=10, verify=False)
+                html_content = r.text
+            except Exception as e:
+                self.log_dashboard(f"[!] Failed to fetch {target}: {e}")
+                return
+
+            # Scan HTML content
+            for name, pattern in patterns.items():
+                for m in re.finditer(pattern, html_content):
+                    val = m.group(0)
+                    self.scan_results["secrets"].append(f"{val} (Source: Main Page)")
+                    self.log_dashboard(f"[!] CRITICAL: Found {name} in Main Page!", "red")
+                    self.log_live(f"[!] CRITICAL: Found {name}: {val}")
+
+            # Extract JS Links
+            if BeautifulSoup:
+                soup = BeautifulSoup(html_content, 'html.parser')
+                for script in soup.find_all('script', src=True):
+                    src = urljoin(target, script['src'])
+                    if domain in src:
+                        js_urls.add(src)
+            else:
+                # Regex Fallback
+                raw_links = re.findall(r'<script[^>]+src=["\'](.*?)["\']', html_content)
+                for link in raw_links:
+                     src = urljoin(target, link)
+                     if domain in src:
+                        js_urls.add(src)
+
+            # Limit to 10
+            js_list = list(js_urls)[:10]
+            self.log_dashboard(f"[*] Scanning {len(js_list)} JS files...")
+
+            for i, js_url in enumerate(js_list):
+                 try:
+                     self.log_live(f"    Scanning JS ({i+1}): {js_url}")
+                     js_r = requests.get(js_url, timeout=5, verify=False)
+                     js_text = js_r.text
+                     
+                     for name, pattern in patterns.items():
+                        for m in re.finditer(pattern, js_text):
+                            val = m.group(0)
+                            # Truncate if too long for log? Nah.
+                            self.scan_results["secrets"].append(f"{val} (Source: {js_url.split('/')[-1]})")
+                            self.log_dashboard(f"[!] CRITICAL: Found {name} in {js_url.split('/')[-1]}!", "red")
+                            self.log_live(f"[!] CRITICAL: Found {name} in JS: {val}")
+                 except Exception as e:
+                     self.log_live(f"    [!] Error scanning JS: {e}")
+
+        except Exception as e:
+            self.log_dashboard(f"[!] Secrets Scan Error: {e}")
+        
+        if not self.scan_results["secrets"]:
+            self.log_dashboard("[-] No secrets found.")
 
 if __name__ == "__main__":
     app = RotemzScanner()
